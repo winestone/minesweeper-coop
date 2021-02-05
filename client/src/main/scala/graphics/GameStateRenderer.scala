@@ -1,14 +1,16 @@
 package graphics
 
 import org.scalajs.dom
-import org.scalajs.dom.MouseEvent
+import org.scalajs.dom.{CanvasRenderingContext2D, MouseEvent}
 import org.scalajs.dom.raw.WebSocket
 
 import scala.scalajs.js
 import scala.scalajs.js.timers._
 import scala.scalajs.js.annotation._
-
-import io.circe._, io.circe.generic.auto._, io.circe.parser._, io.circe.syntax._
+import io.circe._
+import io.circe.generic.auto._
+import io.circe.parser._
+import io.circe.syntax._
 
 
 // TODO: add counter for (total bombs - flags)
@@ -23,27 +25,13 @@ import io.circe._, io.circe.generic.auto._, io.circe.parser._, io.circe.syntax._
 //   lose condition: no alive players
 
 class GameStateRenderer(canvas: dom.html.Canvas) {
-  val ctx = canvas.getContext("2d").asInstanceOf[dom.CanvasRenderingContext2D]
+  val ctx: CanvasRenderingContext2D = canvas.getContext("2d").asInstanceOf[dom.CanvasRenderingContext2D]
 
   def renderBoard(gameState: model.GameState, x: Int, y: Int, w: Int, h: Int): Unit = {
     val CELL_BORDER_SIZE = 2
 
     ctx.fillStyle = "rgb(128, 128, 128)"
     ctx.fillRect(x, y, w, h)
-
-    def isValidCell(row: Int, col: Int): Boolean = {
-      if      (row < 0 || row >= gameState.numRows) false
-      else if (col < 0 || col >= gameState.numCols) false
-      else true
-    }
-    def calcValidAdjacentCells(row: Int, col: Int): Seq[(Int, Int)] = for {
-      r <- row - 1 to row + 1
-      c <- col - 1 to col + 1
-      if isValidCell(r, c)
-    } yield (r, c)
-    def numAdjacentBombs(board: Array[Array[model.Cell]], row: Int, col: Int): Int = {
-      calcValidAdjacentCells(row, col).count { case (r, c) => board(r)(c).state == model.Bomb }
-    }
 
     val xOffset = x + CELL_BORDER_SIZE
     val yOffset = y + CELL_BORDER_SIZE
@@ -82,7 +70,7 @@ class GameStateRenderer(canvas: dom.html.Canvas) {
           renderFullRect("rgb(255, 0, 0)")
           renderTextMiddle("\uD83D\uDCA3", Some("rgb(0, 0, 0)"))
         case model.Cell(_, model.Revealed) =>
-          val count = numAdjacentBombs(gameState.board, row, col)
+          val count = gameState.numAdjacentBombs(row, col)
           renderFullRect("rgb(124, 252, 0)")
           if (count != 0) {
             renderTextMiddle(count.toString, Some("rgb(0, 0, 0)"))
@@ -100,13 +88,13 @@ class GameStateRenderer(canvas: dom.html.Canvas) {
   }
 }
 
-class GameStateClient(gameDiv: dom.html.Div, websocketUrl: String) {
+class GameStateClient(gameDiv: dom.html.Div, webSocketUrl: String) {
   private val canvas = gameDiv.querySelector(".canvas").asInstanceOf[dom.html.Canvas]
   private val retryPopup = gameDiv.querySelector(".retryPopup").asInstanceOf[dom.html.Div]
   private val retryButton = retryPopup.querySelector(".retryButton").asInstanceOf[dom.html.Button]
   private val winText = retryPopup.querySelector(".winText").asInstanceOf[dom.html.Div]
   private val loseText = retryPopup.querySelector(".loseText").asInstanceOf[dom.html.Div]
-  private var websocket: dom.WebSocket = null
+  private var webSocket: dom.WebSocket = null
 
   private var gameState = model.GameStateFactory.newGame(10, 10, 10)
   private val gameStateRenderer = new GameStateRenderer(canvas)
@@ -120,23 +108,23 @@ class GameStateClient(gameDiv: dom.html.Div, websocketUrl: String) {
       started_ = false
   }
 
-  def sendRequest(request: model.ClientRequest): Unit = {
-    websocket.send(request.asJson.noSpaces)
+  def sendRequest(request: model.ClientMsg): Unit = {
+    webSocket.send(request.asJson.noSpaces)
   }
-  
+
   private object WebSocketInterface extends Service {
     override def startup(): Unit = {
       super.startup()
-      websocket = new dom.WebSocket(websocketUrl)
-      websocket.onopen = handleWebsocketOpen _
-      websocket.onmessage = handleWebsocketMessage _
-      websocket.onclose = handleWebsocketClose _
+      webSocket = new dom.WebSocket(webSocketUrl)
+      webSocket.onopen = handleWebSocketOpen _
+      webSocket.onmessage = handleWebSocketMessage _
+      webSocket.onclose = handleWebSocketClose _
     }
-    private def handleWebsocketOpen(e: dom.Event): Unit = {
+    private def handleWebSocketOpen(e: dom.Event): Unit = {
       sendRequest(model.RequestNewGame)
     }
-    private def handleWebsocketMessage(e: dom.MessageEvent): Unit = {
-      decode[model.ClientCommand](e.data.toString) match {
+    private def handleWebSocketMessage(e: dom.MessageEvent): Unit = {
+      decode[model.ServerMsg](e.data.toString) match {
         case Left(err) => println(err); None
         case Right(model.NewGameState(gs)) =>
           gameState = gs
@@ -156,16 +144,16 @@ class GameStateClient(gameDiv: dom.html.Div, websocketUrl: String) {
         }
       }
     }
-    private def handleWebsocketClose(e: dom.CloseEvent): Unit = {
+    private def handleWebSocketClose(e: dom.CloseEvent): Unit = {
       shutdown()
       setTimeout(1000) { startup _ }
     }
     override def shutdown(): Unit = {
       super.shutdown()
-      if ((websocket.readyState == dom.WebSocket.CONNECTING) || (websocket.readyState == dom.WebSocket.OPEN)) {
-        websocket.onmessage = null
-        websocket.onclose = null
-        websocket.close()
+      if ((webSocket.readyState == dom.WebSocket.CONNECTING) || (webSocket.readyState == dom.WebSocket.OPEN)) {
+        webSocket.onmessage = null
+        webSocket.onclose = null
+        webSocket.close()
       }
     }
   }
@@ -259,8 +247,8 @@ class GameStateClient(gameDiv: dom.html.Div, websocketUrl: String) {
   }
 }
 
-@JSExportTopLevel("Destiny")
-object Destiny {
+@JSExportTopLevel("Main")
+object Main {
   @JSExport
   def main(args: Array[String]): Unit = {
     {
@@ -268,7 +256,16 @@ object Destiny {
 
       dom.document.body.appendChild(div(
         div(id:="menu")(
-          input(`class`:="connectInput", value:="ws://" + (if (dom.window.location.hostname.isEmpty) "localhost" else dom.window.location.hostname) + ":7791/multiplayer"),
+          input(`class`:="connectInput", value:={
+            val loc = dom.window.location
+            val protocol = loc.protocol match {
+              case "https:" => "wss"
+              case _ => "ws"
+            }
+            val hostname = if (loc.hostname.isEmpty) "localhost" else loc.hostname
+            val port = if (loc.port.isEmpty) "" else s":${loc.port}"
+            s"$protocol://$hostname$port/multiplayer"
+          }),
           button(`class`:="connectButton")("Connect")
         ),
         div(css("display"):="none", id:="game")(
@@ -288,14 +285,12 @@ object Destiny {
     val game = dom.document.querySelector("#game").asInstanceOf[dom.html.Div]
 
     def handleConnectButtonClick(e: dom.MouseEvent): Unit = {
-      val websocketUrl = menu_connectInput.value
+      val webSocketUrl = menu_connectInput.value
       menu_connectButton.removeEventListener("click", handleConnectButtonClick _)
       menu.style.display = "none"
       game.style.display = ""
-      val gameStateClient = new GameStateClient(game, websocketUrl)
+      val _ = new GameStateClient(game, webSocketUrl)
     }
     menu_connectButton.addEventListener("click", handleConnectButtonClick _)
-
-    println("Fate")
   }
 }
