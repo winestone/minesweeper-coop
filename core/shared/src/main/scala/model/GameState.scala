@@ -48,22 +48,24 @@ case class GameState(
       case Reveal(row, col) => board(row)(col).state == Bomb
       case _ => false
     }
-  def validAdjacentCells(row: Int, col: Int): Seq[(Int, Int)] = for {
+  private def validAdjacentCoords(row: Int, col: Int): Seq[(Int, Int)] = for {
     r <- row - 1 to row + 1
     c <- col - 1 to col + 1
     if isValidCell(r, c)
   } yield (r, c)
+  def validAdjacentCells(row: Int, col: Int): Seq[(Int, Int, Cell)] = validAdjacentCoords(row, col)
+    .map { case (r, c) => (r, c, board(r)(c)) }
 
   private def boardNumAdjacentBombs(board: Array[Array[Cell]], row: Int, col: Int): Int = {
-    validAdjacentCells(row, col).count { case (r, c) => board(r)(c).state == Bomb }
+    validAdjacentCells(row, col).count { case (_, _, cell) => cell.state == Bomb }
   }
   def numAdjacentBombs(row: Int, col: Int): Int = boardNumAdjacentBombs(board, row, col)
   private def reveal(board: Array[Array[Cell]], row: Int, col: Int): Array[Array[Cell]] = {
     board(row)(col) = board(row)(col).copy(modifier = Revealed)
     if (boardNumAdjacentBombs(board, row, col) == 0) {
       validAdjacentCells(row, col)
-        .filter { case (r, c) => board(r)(c).modifier != Revealed }
-        .foreach { case (r, c) => reveal(board, r, c) }
+        .filter { case (_, _, cell) => cell.modifier != Revealed }
+        .foreach { case (r, c, _) => reveal(board, r, c) }
     }
     board
   }

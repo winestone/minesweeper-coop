@@ -5,6 +5,7 @@ A coop version of minesweeper written in Scala.
 Controls:
 - Left click to reveal a block.
 - Right click to flag a block.
+- Left+Right click to reveal adjacent cells if exactly enough adjacent cells are flagged.
 
 Building and running:
 1. `sbt fastOptJS` to compile the client.

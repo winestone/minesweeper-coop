@@ -158,9 +158,10 @@ class GameStateClient(gameDiv: dom.html.Div, webSocketUrl: String) {
     }
   }
 
-  private sealed trait Button
-  private case object LeftButton extends Button
-  private case object RightButton extends Button
+  private sealed trait MouseAction
+  private case object LeftAction extends MouseAction
+  private case object RightAction extends MouseAction
+  private case object LeftRightAction extends MouseAction
 
   private object MainGameInterface extends Service {
     override def startup(): Unit = {
@@ -168,7 +169,7 @@ class GameStateClient(gameDiv: dom.html.Div, webSocketUrl: String) {
       canvas.addEventListener("contextmenu", handleMouseEventFunc)
       canvas.addEventListener("click", handleMouseEventFunc)
     }
-    private def handleMouseClick(button: Button, x: Int, y: Int): Unit = {
+    private def handleMouseClick(mouseAction: MouseAction, x: Int, y: Int): Unit = {
       if (WebSocketInterface.started) {
         val CELL_BORDER_SIZE = 2
         val w = gameState.numCols * 30
@@ -178,28 +179,45 @@ class GameStateClient(gameDiv: dom.html.Div, webSocketUrl: String) {
 
         val row = (y / cellHeight).floor.toInt
         val col = (x / cellWidth).floor.toInt
-        val action: model.Action = (button match {
-          case LeftButton => model.Reveal // left click
-          case RightButton => gameState.board(row)(col).modifier match { // right click
+        val actions: Seq[model.Action] = (mouseAction match {
+          case LeftAction => Seq(model.Reveal(row, col))
+          case RightAction => Seq((gameState.board(row)(col).modifier match {
             case model.Flagged => model.Unflag
             case model.Hidden => model.Flag
             case _ => model.Reveal
+          })(row, col))
+          case LeftRightAction => {
+            val numAdjacentFlagged = gameState.validAdjacentCells(row, col)
+              .count { case (_, _, cell) => cell.modifier == model.Flagged }
+            if (gameState.numAdjacentBombs(row, col) == numAdjacentFlagged) {
+              gameState.validAdjacentCells(row, col)
+                .filter { case (_, _, cell) => cell.modifier == model.Hidden }
+                .map { case (r, c, _) => model.Reveal(r, c) }
+            } else {
+              Seq()
+            }
           }
-        })(row, col)
-        sendRequest(model.ClientGameAction(action))
+        })
+        actions.foreach(action => sendRequest(model.ClientGameAction(action)))
 
         gameStateRenderer.render(gameState)
       }
     }
     private def handleMouseEvent(e: dom.MouseEvent): Unit = {
-      if (e.button != 1) {
-        handleMouseClick(e.button match {
-          case 0 => LeftButton
-          case 2 => RightButton
-        }, (e.pageX - canvas.offsetLeft).toInt, (e.pageY - canvas.offsetTop).toInt) // http://stackoverflow.com/a/14872192/3492895
+      // `e.buttons` doesn't include the button triggering the `click` event
+      // https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/button
+      // https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/buttons
+      val buttons = e.buttons + Seq(1, 4, 2, 8, 16)(e.button)
+      (buttons match {
+        case 1 => Some(LeftAction)
+        case 2 => Some(RightAction)
+        case 3 => Some(LeftRightAction)
+        case _ => None
+      }).foreach(mouseAction => {
+        handleMouseClick(mouseAction, (e.pageX - canvas.offsetLeft).toInt, (e.pageY - canvas.offsetTop).toInt) // http://stackoverflow.com/a/14872192/3492895
         e.preventDefault()
         e.stopPropagation()
-      }
+      })
     }
     val handleMouseEventFunc: js.Function1[dom.MouseEvent, Unit] = handleMouseEvent _
     override def shutdown(): Unit = {
